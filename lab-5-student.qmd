@@ -1,9 +1,17 @@
 ---
 title: "Lab 5: Murder in SQL City"
-author: "Your name here!"
-format: html
+author: "Kyle Taschek!"
+format: 
+  html:  
+    embed-resources: true
+    code-tools: true
+    toc: true
 editor: source
-embed-resources: true
+execute: 
+  echo: true
+  warning: false
+  error: true
+code-fold: true
 ---
 
 For this lab, you will be joining and filtering related datasets to solve a murder mystery!
@@ -54,8 +62,199 @@ Detective Wickham reaches out to you...
 
 > A crime has taken place and I need your help! There was a murder in SQL City sometime on January 15, 2018. Could you retrieve the crime scene report from the police department’s database and follow the clues to find the person responsible for the murder?!
 
+## Get Crime Description
+
+description:
 ```{r}
 #| label: inspecting-crime-scene-report
+
+# Step 1: Filter to find the description of the murder (using the given date, crime, and city)
+crime_scene_report |>
+  filter(
+    ymd(date) == ymd(20180115),
+    city == "SQL City",
+    type == "murder"
+  ) |>
+  pull(description)
+
+```
+## Find and Check in with the Witnesses
+
+Witness Ids for the case:
+```{r}
+#| label: finding-witnesses
+
+# Step 2: Find witnesses
+
+# Finding id of witness 1 given the crime description
+person |>
+  filter(
+    address_street_name == "Northwestern Dr",
+  ) |>
+  slice_max(address_number) |>
+  pull(id)
+
+# Finding id of witness 2 given the crime description
+person |>
+  filter(
+    str_detect(name, "Annabel"),
+    address_street_name == "Franklin Ave"
+  ) |>
+  pull(id)
+
+```
+
+Witness interviews:
+```{r}
+#| label: finding-witness-interviews
+
+# Step 2: Find witnesses
+# (14887 and 16371)
+
+# Finding interview transcript on witness 1 given the crime description
+person |>
+  filter(
+    address_street_name == "Northwestern Dr",
+  ) |>
+  slice_max(address_number) |>
+  left_join(
+    interview, join_by(id == person_id)
+  ) |>
+  pull(transcript)
+
+
+# Finding interview transcript on witness 2 given the crime description
+person |>
+  filter(
+    str_detect(name, "Annabel"),
+    address_street_name == "Franklin Ave"
+  ) |>
+  left_join(
+    interview, join_by(id == person_id)
+  ) |>
+  pull(transcript)
+
+
+```
+## Finding the Suspect
+
+suspects id:
+```{r}
+#| label: finding-suspect
+
+# Step 3: Find suspect using the given hints from the transcript
+
+# 1. rename the id value to membership_id in the get_fit_now_member df to prevent overlapping column names
+# 2.join the necessary tables so we can get the values we want to check
+# - get_fit_now_member for status and membership id
+# - get_fit_now_check_in for check in date
+# - drivers_license to get license plate and sex
+#
+# 2=3. Use the filter to check all the values given in the transcripts
+
+# rename column
+renamed_get_fit_now_member <-get_fit_now_member |>
+      rename(membership_id = id)
+
+suspect_id <- person |>
+  inner_join(
+    renamed_get_fit_now_member,
+    join_by(id == person_id)
+  ) |>
+  left_join(
+    get_fit_now_check_in,
+    join_by(membership_id == membership_id)
+  ) |>
+  left_join(
+    drivers_license,
+    join_by(license_id == id)
+  ) |>
+  filter(
+    ymd(check_in_date) == ymd(20180109),
+    membership_status == "gold",
+    str_detect(plate_number, "H42W"),
+    str_starts(membership_id, "48Z"),
+    gender == "male"
+  ) |>
+  pull(id)
+
+suspect_id
+
+```
+
+## Get Suspect Testimony
+
+transcript:
+```{r}
+#| label: check-suspect-interview
+
+# Step 4: Check suspect interview
+
+person |>
+  inner_join(
+    interview,
+    join_by(id == person_id)
+  ) |>
+  filter(
+    id == suspect_id
+  ) |>
+  pull(transcript)
+
+```
+
+## Find Who Hired the Suspect
+
+suspect employer id:
+```{r}
+#| label: find-who-hired-suspect
+
+# Step 5: Find who hired the suspect
+
+employer_id <- person |>
+  inner_join(
+    facebook_event_checkin,
+    join_by(id == person_id)
+  ) |>
+  left_join(
+    drivers_license,
+    join_by(license_id == id)
+  ) |>
+  filter(
+    gender == "female",
+    height %in% c(65:67),
+    hair_color == "red",
+    car_make == "Tesla",
+    car_model == "Model S",
+    event_name == "SQL Symphony Concert",
+    month(ymd(date)) == 12,
+    year(ymd(date)) == 2017
+  ) |>
+  group_by(id) |>
+  summarize(concert_count = n()) |>
+  filter(concert_count == 3) |>
+  pull(id)
+
+employer_id
+
+```
+
+## Confront the Suspect
+
+nothing to say:
+```{r}
+#| label: check-hiring-suspect-interview
+
+# Step 6: Check suspect interview
+
+person |>
+  left_join(
+    interview,
+    join_by(id == person_id)
+  ) |>
+  filter(
+    id == employer_id
+  ) |>
+  select(name, transcript)
 
 ```
 
@@ -66,4 +265,4 @@ Hint: Make sure you check for interviews with any suspects!
 
 ## And the final suspect is...
 
-*Put the name of the person responsible for the murder here:*
+Jeremy Bowers	committed murder and he was hired by Miranda Priestly who has nothing to say for herself.
